@@ -1,67 +1,165 @@
+from datetime import datetime
+from fpdf import FPDF
 import pandas as pd
+import sqlite3
 import streamlit as st
 
 # Configuración inicial de la página web
 st.set_page_config(
-    page_title="Dashboard Comercial e Inventarios",
+    page_title="Dashboard Comercial e Inventarios Avanzado",
     page_icon="📊",
     layout="wide",
 )
 
-st.title("📊 Dashboard Comercial e Inventarios - Inteligencia de Negocios")
-st.markdown(
-    "Sistema inteligente para el control de stock, análisis de ventas y"
-    " optimización de micro-negocios."
-)
-st.markdown("---")
 
-# 1. Base de datos simulada (Simulando el inventario de un comercio local)
-datos_ejemplo = {
-    "Producto": [
-        "Recargas Telefónicas",
-        "Fundas para Celular",
-        "Servicio de Copias e Impresiones",
-        "Pago de Servicios",
-        "Accesorios de Cómputo",
-    ],
-    "Categoría": [
-        "Servicios",
-        "Accesorios",
-        "Papelería",
-        "Servicios",
-        "Electrónica",
-    ],
-    "Stock Actual": [150, 18, 500, 100, 12],
-    "Stock Mínimo": [50, 20, 100, 20, 15],
-    "Precio Venta (MXN)": [50.0, 150.0, 2.0, 15.0, 350.0],
-    "Ventas Mensuales": [1200, 45, 3000, 250, 8],
-}
-df_base = pd.DataFrame(datos_ejemplo)
+# --- 1. CONEXIÓN Y CONFIGURACIÓN DE LA BASE DE DATOS REAL (SQLite) ---
+def inicializar_db():
+  conn = sqlite3.connect("inventario_negocio.db")
+  cursor = conn.cursor()
+  # Crear tabla si no existe
+  cursor.execute("""
+        CREATE TABLE IF NOT EXISTS productos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            producto TEXT,
+            categoria TEXT,
+            stock_actual INTEGER,
+            stock_minimo INTEGER,
+            precio REAL,
+            ventas_mensuales INTEGER
+        )
+    """)
+  conn.commit()
 
-# 2. Panel Lateral (Filtros y Configuración)
-st.sidebar.header("⚙️ Panel de Control")
-opcion_vista = st.sidebar.radio(
-    "Selecciona una vista:",
-    ["Inventario Base del Negocio", "Cargar Datos Propios (Excel/CSV)"],
-)
+  # Si la tabla está vacía, insertamos datos iniciales de ejemplo
+  cursor.execute("SELECT COUNT(*) FROM productos")
+  if cursor.fetchone()[0] == 0:
+    datos_iniciales = [
+        ("Recargas Telefónicas", "Servicios", 150, 50, 50.0, 1200),
+        ("Fundas para Celular", "Accesorios", 18, 20, 150.0, 45),
+        ("Servicio de Copias e Impresiones", "Papelería", 500, 100, 2.0, 3000),
+        ("Pago de Servicios", "Servicios", 100, 20, 15.0, 250),
+        ("Accesorios de Cómputo", "Electrónica", 12, 15, 350.0, 8),
+    ]
+    cursor.executemany(
+        """
+            INSERT INTO productos (producto, categoria, stock_actual, stock_minimo, precio, ventas_mensuales)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        datos_iniciales,
+    )
+    conn.commit()
+  conn.close()
 
-if opcion_vista == "Inventario Base del Negocio":
-  df = df_base
-else:
-  st.sidebar.markdown(
-      "Sube un archivo CSV con las columnas de tus propios productos."
+
+inicializar_db()
+
+
+# Funciones para interactuar con la Base de Datos
+def cargar_datos_db():
+  conn = sqlite3.connect("inventario_negocio.db")
+  df = pd.read_sql_query("SELECT * FROM productos", conn)
+  conn.close()
+  return df
+
+
+def agregar_producto_db(
+    prod, cat, stock, stock_min, precio, ventas
+):  # pylint: disable=too-many-arguments
+  conn = sqlite3.connect("inventario_negocio.db")
+  cursor = conn.cursor()
+  cursor.execute(
+      """
+        INSERT INTO productos (producto, categoria, stock_actual, stock_minimo, precio, ventas_mensuales)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """,
+      (prod, cat, stock, stock_min, precio, ventas),
   )
-  archivo = st.sidebar.file_uploader("Cargar archivo", type=["csv", "xlsx"])
-  if archivo is not None:
-    if archivo.name.endswith(".csv"):
-      df = pd.read_csv(archivo)
-    else:
-      df = pd.read_excel(archivo)
-  else:
-    df = df_base
-    st.sidebar.info("Mostrando datos de demostración mientras subes un archivo.")
+  conn.commit()
+  conn.close()
 
-# 3. Indicadores Clave (KPIs Comerciales)
+
+# --- 2. GENERADOR DE REPORTES EN PDF ---
+def generar_pdf(df_inventario):
+  pdf = FPDF()
+  pdf.add_page()
+  pdf.set_font("Arial", "B", 16)
+  pdf.cell(
+      200,
+      10,
+      txt="Reporte Ejecutivo - Control de Inventarios",
+      ln=True,
+      align="C",
+  )
+  pdf.set_font("Arial", "", 10)
+  pdf.cell(
+      200,
+      10,
+      txt=f"Fecha de emisión: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+      ln=True,
+      align="C",
+  )
+  pdf.ln(10)
+
+  pdf.set_font("Arial", "B", 10)
+  pdf.cell(60, 10, "Producto", 1)
+  pdf.cell(35, 10, "Categoria", 1)
+  pdf.cell(25, 10, "Stock", 1)
+  pdf.cell(25, 10, "Minimo", 1)
+  pdf.cell(30, 10, "Precio ($)", 1)
+  pdf.ln()
+
+  pdf.set_font("Arial", "", 10)
+  for _, row in df_inventario.iterrows():
+    pdf.cell(60, 10, str(row["producto"]), 1)
+    pdf.cell(35, 10, str(row["categoria"]), 1)
+    pdf.cell(25, 10, str(row["stock_actual"]), 1)
+    pdf.cell(25, 10, str(row["stock_minimo"]), 1)
+    pdf.cell(30, 10, str(row["precio"]), 1)
+    pdf.ln()
+
+  # Solución: envolvemos el resultado en bytes()
+  return bytes(pdf.output(dest="S"))
+
+# Cargar datos desde SQLite
+df = cargar_datos_db()
+
+# Panel lateral para controles y registro
+st.sidebar.header("⚙️ Gestión del Negocio")
+menu = st.sidebar.radio(
+    "Selecciona una opción:", ["Vista General y KPIs", "Registrar Nuevo Producto"]
+)
+
+if menu == "Registrar Nuevo Producto":
+  st.sidebar.subheader("➕ Agregar al Inventario SQL")
+  with st.sidebar.form("form_producto"):
+    nuevo_prod = st.text_input("Nombre del Producto")
+    nueva_cat = st.selectbox(
+        "Categoría",
+        ["Servicios", "Accesorios", "Papelería", "Electrónica", "General"],
+    )
+    nuevo_stock = st.number_input("Stock Actual", min_value=0, value=10)
+    nuevo_min = st.number_input("Stock Mínimo de Alerta", min_value=0, value=5)
+    nuevo_precio = st.number_input(
+        "Precio de Venta ($)", min_value=0.0, value=100.0
+    )
+    nuevas_ventas = st.number_input(
+        "Ventas Mensuales Estimadas", min_value=0, value=50
+    )
+
+    submit = st.form_submit_button("Guardar en Base de Datos")
+    if submit and nuevo_prod:
+      agregar_producto_db(
+          nuevo_prod,
+          nueva_cat,
+          nuevo_stock,
+          nuevo_min,
+          nuevo_precio,
+          nuevas_ventas,
+      )
+      st.sidebar.success(f"¡Producto '{nuevo_prod}' guardado con éxito!")
+      st.rerun()
+
+# --- 4. INDICADORES CLAVE (KPIs) ---
 st.subheader("📌 Indicadores Clave de Desempeño (KPIs)")
 col1, col2, col3 = st.columns(3)
 
@@ -69,45 +167,46 @@ with col1:
   st.metric(
       label="Total de Productos Registrados",
       value=len(df),
-      delta="Catálogo Activo",
+      delta="Base SQL Activa",
   )
 
 with col2:
-  if "Ventas Mensuales" in df.columns:
-    total_ventas = df["Ventas Mensuales"].sum()
-    st.metric(
-        label="Volumen Total de Ventas", value=f"{total_ventas:,} unidades"
-    )
-  else:
-    st.metric(label="Volumen Total de Ventas", value="N/D")
+  total_ventas = df["ventas_mensuales"].sum()
+  st.metric(label="Volumen Total de Ventas", value=f"{total_ventas:,} unidades")
 
 with col3:
-  if "Stock Actual" in df.columns and "Stock Mínimo" in df.columns:
-    alertas = len(df[df["Stock Actual"] <= df["Stock Mínimo"]])
-    st.metric(
-        label="Alertas de Stock Bajo",
-        value=alertas,
-        delta="-Reabastecer urgente" if alertas > 0 else "Stock Seguro",
-        delta_color="inverse",
-    )
+  alertas = len(df[df["stock_actual"] <= df["stock_minimo"]])
+  st.metric(
+      label="Alertas de Stock Bajo",
+      value=alertas,
+      delta="-Reabastecer urgente" if alertas > 0 else "Stock Seguro",
+      delta_color="inverse",
+  )
 
 st.markdown("---")
 
-# 4. Tabla Interactiva de Inventario
-st.subheader("📦 Control de Stock y Existencias")
+# --- 5. TABLA Y EXPORTACIÓN A PDF ---
+st.subheader("📦 Control de Stock en Base de Datos")
 st.dataframe(df, use_container_width=True)
 
-# 5. Gráficas interactivas
+# Botón de descarga de PDF
+st.markdown("### 📄 Descargar Reporte Ejecutivo")
+if not df.empty:
+  pdf_bytes = generar_pdf(df)
+  st.download_button(
+      label="📥 Descargar Reporte de Inventario en PDF",
+      data=pdf_bytes,
+      file_name="reporte_inventario.pdf",
+      mime="application/pdf",
+  )
+
+# --- 6. GRÁFICAS INTERACTIVAS ---
 st.markdown("---")
 st.subheader("📈 Análisis Visual de Movimiento")
-if "Producto" in df.columns and "Ventas Mensuales" in df.columns:
-  st.bar_chart(df.set_index("Producto")["Ventas Mensuales"])
-else:
-  st.info("El archivo cargado no contiene las columnas para generar la gráfica.")
+if not df.empty:
+  st.bar_chart(df.set_index("producto")["ventas_mensuales"])
 
-# Pie de página comercial
 st.markdown("---")
 st.markdown(
-    "💡 *Desarrollado con Inteligencia Artificial y Python para optimización"
-    " comercial.*"
+    "💡 *Software de Inteligencia de Negocios optimizado para PyMEs y comercios.*"
 )
