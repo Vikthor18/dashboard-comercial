@@ -160,7 +160,7 @@ df = cargar_datos_db()
 # Panel lateral para controles y registro
 st.sidebar.header("⚙️ Gestión del Negocio")
 menu = st.sidebar.radio(
-    "Selecciona una opción:", ["Vista General y KPIs", "Registrar Nuevo Producto"]
+    "Selecciona una opción:", ["Vista General y KPIs", "Registrar Nuevo Producto","🛒 Registrar Venta Diaria",]
 )
 
 if menu == "Registrar Nuevo Producto":
@@ -192,7 +192,41 @@ if menu == "Registrar Nuevo Producto":
       )
       st.sidebar.success(f"¡Producto '{nuevo_prod}' guardado con éxito!")
       st.rerun()
+if menu == "🛒 Registrar Venta Diaria":
+  st.sidebar.subheader("💰 Registrar Salida de Stock")
+  df_actual = cargar_datos_db()
 
+  if not df_actual.empty:
+    with st.sidebar.form("form_venta"):
+      # Creamos un selectbox con los nombres de los productos
+      producto_seleccionado = st.selectbox(
+          "Selecciona el Producto", df_actual["producto"].tolist()
+      )
+      cantidad = st.number_input(
+          "Cantidad Vendida", min_value=1, value=1, step=1
+      )
+
+      btn_vender = st.form_submit_button("Confirmar Venta")
+      if btn_vender:
+        # Buscamos el ID del producto seleccionado
+        id_prod = df_actual[df_actual["producto"] == producto_seleccionado][
+            "id"
+        ].values[0]
+        exito = registrar_venta_db(int(id_prod), int(cantidad))
+
+        if exito:
+          st.sidebar.success(
+              f"¡Venta registrada! Se descontaron {cantidad} unidades de"
+              f" '{producto_seleccionado}'."
+          )
+          st.rerun()
+        else:
+          st.sidebar.error(
+              "Error: No hay suficiente stock disponible para realizar esta"
+              " venta."
+          )
+  else:
+    st.sidebar.warning("No hay productos registrados en la base de datos.")
 # --- 4. INDICADORES CLAVE (KPIs) ---
 st.subheader("📌 Indicadores Clave de Desempeño (KPIs)")
 col1, col2, col3 = st.columns(3)
