@@ -60,7 +60,41 @@ def cargar_datos_db():
   df = pd.read_sql_query("SELECT * FROM productos", conn)
   conn.close()
   return df
+    
+def registrar_venta_db(producto_id, cantidad_vendida):
+  conn = sqlite3.connect("inventario_negocio.db")
+  cursor = conn.cursor()
 
+  # Obtenemos el stock actual y las ventas actuales del producto
+  cursor.execute(
+      "SELECT stock_actual, ventas_mensuales FROM productos WHERE id = ?",
+      (producto_id,),
+  )
+  resultado = cursor.fetchone()
+
+  if resultado:
+    stock_actual, ventas_actuales = resultado
+    if stock_actual >= cantidad_vendida:
+      nuevo_stock = stock_actual - cantidad_vendida
+      nuevas_ventas = ventas_actuales + cantidad_vendida
+
+      # Actualizamos la base de datos
+      cursor.execute(
+          """
+                UPDATE productos 
+                SET stock_actual = ?, ventas_mensuales = ? 
+                WHERE id = ?
+            """,
+          (nuevo_stock, nuevas_ventas, producto_id),
+      )
+      conn.commit()
+      conn.close()
+      return True
+    else:
+      conn.close()
+      return False
+  conn.close()
+  return False
 
 def agregar_producto_db(
     prod, cat, stock, stock_min, precio, ventas
